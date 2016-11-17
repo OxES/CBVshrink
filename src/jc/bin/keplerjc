@@ -1,0 +1,210 @@
+#!/usr/bin/env python
+import numpy as np
+import astropy.io.fits as pf
+import logging
+import warnings
+
+from argparse import ArgumentParser
+from os.path import isdir, dirname, basename, abspath, join
+from keplerjc import JumpFinder, JumpClassifier, KData, correct_jumps
+from glob import glob
+
+import matplotlib.pyplot as pl
+
+try:
+    from mpi4py import MPI
+    comm = MPI.COMM_WORLD
+    mpi_rank = comm.Get_rank()
+    mpi_size = comm.Get_size()
+    with_mpi = True
+except ImportError:
+    mpi_rank = 0
+    mpi_size = 1
+    with_mpi = False
+
+mpi_root = 0
+np.seterr(all='ignore')
+logging.basicConfig(level=logging.INFO)
+
+excluded_cadences = {3 : [[ 8390, 8440], [ 8880, 8940], [10390,10650]],
+                     4 : [[12900,13000], [13400,13500], [14200,14400]],
+                     5 : [[17914,17981], [19320,19365]],
+                     6 : [[22390,22440], [23945,23995]],
+                     7 : [[26979,27022], [28444,28495], [29458,29487]],
+                     8 : [[31900,32050]]}
+
+def main():
+    ap = ArgumentParser()
+    ap.add_argument('filename', type=str, help='MAST Kepler file')
+    ap.add_argument('--savedir', type=str, default='.', help='Directory to save the files in')
+    ap.add_argument('--inplace', action='store_true', default=False, help='Modify the original files.')
+    ap.add_argument('--skip-searched', action='store_true', default=False, help='Skip jump-corrected files')
+    ap.add_argument('--logfile', type=str, default=None)
+    ap.add_argument('--plot-interactive', action='store_true', default=False)
+    ap.add_argument('--de-niter', type=int, default=300)
+    ap.add_argument('--de-npop', type=int, default=50)
+    ap.add_argument('--modules', type=str, default=None)
+    ap.add_argument('--outputs', type=str, default=None)
+    ap.add_argument('--modouts', type=str, default=None)
+    args = ap.parse_args()
+
+    ## Logging
+    ## -------
+    if mpi_rank == mpi_root:
+        logger = logging.getLogger('Master')
+        if args.logfile:
+            logfile = open(args.logfile, mode='w')
+            fh = logging.StreamHandler(logfile)
+            fh.setFormatter(logging.Formatter('%(levelname)s %(name)s: %(message)s'))
+            fh.setLevel(logging.DEBUG)
+            logger.addHandler(fh)
+
+        if isdir(args.filename):
+            files = sorted(glob(join(args.filename,'kplr*llc.fits')))
+        else:
+            files = [args.filename]
+        nfiles = len(files)
+        
+        logging.info('')
+        logging.info(' KeplerJC')
+        logging.info(' --------')
+        if nfiles == 1:
+            logging.info(' Reducing a single file: %s', abspath(args.filename))
+        else:
+            logging.info(' Reducing %i files in a directory: %s', nfiles, abspath(args.filename))
+        logging.info(' Save directory: %s', abspath(args.savedir) if not args.inplace else abspath(dirname(args.filename)))
+        logging.info(' Mode: %s', 'inplace' if args.inplace else 'new file')
+
+        ## Without MPI or running with a single node
+        ## =========================================
+        if (not with_mpi) or (mpi_size==1) or (nfiles==1):
+            for f in files:
+                reduce(f, args)
+
+        else:
+            ## Master node
+            ## -----------
+            if mpi_rank == 0:
+                free_workers = range(1,mpi_size)
+                active_workers = []
+                n_finished_items = 0
+
+                while files or active_workers:
+                    ## Send a file
+                    while files and free_workers:
+                        w = free_workers.pop()
+                        comm.send(files.pop(), dest=w, tag=0)
+                        active_workers.append(w)
+
+                    ## Receive the results
+                    for w in active_workers:
+                        if comm.Iprobe(w, 2):
+                            res = comm.recv(source=w, tag=2)
+                            free_workers.append(w)
+                            active_workers.remove(w)
+                            n_finished_items += 1
+
+                for w in free_workers:
+                    comm.send(-1, dest=w, tag=0)
+
+    ## Worker node
+    ## -----------
+    else:
+        while True:
+            filename = comm.recv(source=mpi_root, tag=0)
+            if filename == -1:
+                break
+            reduce(filename, args)
+            comm.send(filename, dest=mpi_root, tag=2)    
+
+
+
+def reduce(filename, args):
+    if mpi_rank == mpi_root:
+        logger  = logging.getLogger('Master')
+    else:
+        logger  = logging.getLogger('Worker %i'%mpi_rank)
+
+    linfo  = logger.info
+    lerror = logger.error
+
+    hdul = pf.open(filename, mode = 'update' if args.inplace else 'readonly')
+    mod = hdul[0].header['module']
+    out = hdul[0].header['output']
+    qrt = hdul[0].header['quarter']
+    
+    if args.modouts is not None:
+        modouts = np.array([np.fromstring(s, sep=',', dtype=np.int) for s in args.modouts.split(';')])
+        if not np.any([mod == m and out==o for m,o in modouts]):
+            hdul.close()
+            return
+    
+    if args.modules is not None:
+        modules = np.fromstring(args.modules, sep=',', dtype=np.int)
+        if mod not in modules:
+            #linfo(' Skipping a file from an excluded module')
+            hdul.close()
+            return
+        
+    if args.outputs is not None:
+        outputs = np.fromstring(args.outputs, sep=',', dtype=np.int)
+        if out not in outputs:
+            #linfo(' Skipping a file from an excluded output')
+            hdul.close()
+            return
+        
+    data     = hdul[1].data
+    kdata    = KData(data['cadenceno'], data['sap_flux'], data['sap_quality'])
+    excluded = excluded_cadences.get(qrt, [])
+    
+    linfo('')
+    linfo(' Reducing file %s', basename(filename))
+    linfo('')
+    linfo(' Starting discontinuity search')
+    linfo(' -----------------------------')
+    jf = JumpFinder(kdata, exclude=excluded)
+    jumps = jf.find_jumps()
+    linfo('    Found %i discontinuities', len(jumps))
+
+    linfo('')
+    linfo(' Starting discontinuity classification')
+    linfo(' -------------------------------------')
+    jc = JumpClassifier(kdata, jf.hp)
+    jc.classify(jumps, use_de=True, de_niter=args.de_niter, de_npop=args.de_npop)
+
+    linfo('')
+    linfo(' Removing jumps')
+    linfo(' --------------')
+    cdata = correct_jumps(kdata, jumps)
+
+    if 'JCR_FLUX' in [c.name for c in data.columns]:
+        data['JCR_FLUX'][:] = cdata._flux.astype(np.float32)
+    else:
+        hdul[1] = pf.BinTableHDU.from_columns(data.columns + pf.Column(name='JCR_FLUX', format='E', unit='e-/s', disp='E14.7', array=cdata._flux.astype(np.float32)),
+                                               header = hdul[1].header)
+
+    hdul[1].header['jlocs']  = str([j.position for j in jumps])
+    hdul[1].header['jamps']  = str([j.amplitude for j in jumps])
+    hdul[1].header['jtypes'] = str([j.name for j in jumps])
+
+    if args.inplace:
+        hdul.flush()
+    else:
+        hdul.writeto(join(args.savedir, basename(filename)), clobber=False)
+    hdul.close()
+
+    linfo('')
+    linfo(' Jump correction finished succesfully')
+    linfo('')
+
+    if args.plot_interactive:
+        fig,ax = pl.subplots(1,1,figsize=(13,5))
+        ax.plot(cadence, flux, 'k')
+        [ax.axvline(j.pos, ls='-', c='k', alpha=0.5) for j in jumps]
+        pl.setp(ax, xlim=cadence[[0,-1]], xlabel='Cadence', ylabel='Flux')
+        fig.tight_layout()
+        pl.show()
+
+
+if __name__ == '__main__':
+    main()
