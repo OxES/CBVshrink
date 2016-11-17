@@ -1,0 +1,334 @@
+#!/usr/bin/env python
+import numpy as np
+import astropy.io.fits as pf
+import logging
+import warnings
+
+from argparse import ArgumentParser
+from os.path import isdir, dirname, basename, abspath, join
+from cbvshrink.cbv import fixed_nb, sel_nb
+from cbvshrink.stats import cdpp, medransig
+from glob import glob
+
+import matplotlib.pyplot as pl
+
+try:
+    from mpi4py import MPI
+    comm = MPI.COMM_WORLD
+    mpi_rank = comm.Get_rank()
+    mpi_size = comm.Get_size()
+    with_mpi = True
+except ImportError:
+    mpi_rank = 0
+    mpi_size = 1
+    with_mpi = False
+
+mpi_root = 0
+np.seterr(all='ignore')
+logging.basicConfig(level=logging.INFO)
+
+def main():
+    ap = ArgumentParser()
+    ap.add_argument('filename', type=str, help='input light curve file')
+    ap.add_argument('cbvfile', type=str, help='input CBV file')
+    ap.add_argument('--nBmax', type=int, default=8, help='max. no CBVs to use (default 8)')
+    ap.add_argument('--savedir', type=str, default='.', help='Directory to save the files in')
+    ap.add_argument('--inplace', action='store_true', default=False, help='Modify the original files.')
+    ap.add_argument('--logfile', type=str, default=None)
+    ap.add_argument('--plot-interactive', action='store_true', default=False)
+    ap.add_argument('--input_type', type=str, default='JCR')
+    ap.add_argument('--modules', type=str, default=None)
+    ap.add_argument('--outputs', type=str, default=None)
+    ap.add_argument('--modouts', type=str, default=None)
+    args = ap.parse_args()
+
+    ## Logging
+    ## -------
+    if mpi_rank == mpi_root:
+        logger = logging.getLogger('Master')
+        if args.logfile:
+            logfile = open(args.logfile, mode='w')
+            fh = logging.StreamHandler(logfile)
+            fh.setFormatter(logging.Formatter('%(levelname)s %(name)s: %(message)s'))
+            fh.setLevel(logging.DEBUG)
+            logger.addHandler(fh)
+
+        if isdir(args.filename):
+            files = sorted(glob(join(args.filename,'kplr*llc.fits')))
+        else:
+            files = [args.filename]
+        nfiles = len(files)
+        
+        logging.info('')
+        logging.info(' Kepler CBVshrink')
+        logging.info(' ----------------')
+        if nfiles == 1:
+            logging.info(' Reducing a single file: %s', abspath(args.filename))
+        else:
+            logging.info(' Reducing %i files in a directory: %s', nfiles, abspath(args.filename))
+        logging.info(' Save directory: %s', abspath(args.savedir) if not args.inplace else abspath(dirname(args.filename)))
+        logging.info(' Mode: %s', 'inplace' if args.inplace else 'new file')
+
+        ## Without MPI or running with a single node
+        ## =========================================
+        if (not with_mpi) or (mpi_size==1) or (nfiles==1):
+            for f in files:
+                reduce(f, args)
+
+        else:
+            ## Master node
+            ## -----------
+            if mpi_rank == 0:
+                free_workers = range(1,mpi_size)
+                active_workers = []
+                n_finished_items = 0
+
+                while files or active_workers:
+                    ## Send a file
+                    while files and free_workers:
+                        w = free_workers.pop()
+                        comm.send(files.pop(), dest=w, tag=0)
+                        active_workers.append(w)
+
+                    ## Receive the results
+                    for w in active_workers:
+                        if comm.Iprobe(w, 2):
+                            res = comm.recv(source=w, tag=2)
+                            free_workers.append(w)
+                            active_workers.remove(w)
+                            n_finished_items += 1
+
+                for w in free_workers:
+                    comm.send(-1, dest=w, tag=0)
+
+    ## Worker node
+    ## -----------
+    else:
+        while True:
+            filename = comm.recv(source=mpi_root, tag=0)
+            if filename == -1:
+                break
+            reduce(filename, args)
+            comm.send(filename, dest=mpi_root, tag=2)    
+
+def reduce(filename, args):
+    if mpi_rank == mpi_root:
+        logger  = logging.getLogger('Master')
+    else:
+        logger  = logging.getLogger('Worker %i'%mpi_rank)
+
+    linfo  = logger.info
+    lerror = logger.error
+
+    hdul = pf.open(filename, mode = 'update' if args.inplace else 'readonly')
+    mod = hdul[0].header['module']
+    out = hdul[0].header['output']
+    
+    if args.modouts is not None:
+        modouts = np.array([np.fromstring(s, sep=',', dtype=np.int) for s in args.modouts.split(';')])
+        if not np.any([mod == m and out==o for m,o in modouts]):
+            hdul.close()
+            return
+    
+    if args.modules is not None:
+        modules = np.fromstring(args.modules, sep=',', dtype=np.int)
+        if mod not in modules:
+            #linfo(' Skipping a file from an excluded module')
+            hdul.close()
+            return
+        
+    if args.outputs is not None:
+        outputs = np.fromstring(args.outputs, sep=',', dtype=np.int)
+        if out not in outputs:
+            #linfo(' Skipping a file from an excluded output')
+            hdul.close()
+            return
+        
+    # Read in light curve data
+    kic = hdul[0].header['KEPLERID']
+    quarter = hdul[0].header['QUARTER']
+    data = hdul[1].data
+    time = data.field('TIME').astype('float64')
+    sap = data.field('SAP_FLUX').astype('float64')
+    # Apply contamination and flux-loss corrections to SAP data
+    try:
+        crowd = hdul[1].header['CROWDSAP']
+    except KeyError:
+        crowd = np.nan
+    if np.isfinite(crowd):
+        l = np.isfinite(sap)
+        sap_med = np.median(sap[l])
+        crowd_corr = sap_med * (1.0 - crowd)
+    else: 
+        crowd_corr = 0.0
+    try:
+        flrfc = hdul[1].header['FLRFCSAP']
+    except KeyError:
+        flrfc = 1.0
+    if not np.isfinite(flrfc):
+        flrfc = 1.0
+    sap = (sap - crowd_corr) / flrfc
+    sap_cdpp = cdpp(time, sap)
+    sap_med, sap_ran, sap_sig = medransig(sap)
+    pdc = data.field('PDCSAP_FLUX').astype('float64')
+    pdc_cdpp = cdpp(time, pdc)
+    pdc_med, pdc_ran, pdc_sig = medransig(pdc)
+    # pdc = pdc - pdc_med + sap_med
+    if args.input_type == 'SAP':
+        flux = sap.copy()
+    elif args.input_type == 'JCR':
+        flux = data.field('JCR_FLUX').astype('float64')
+        flux = (flux - crowd_corr) / flrfc
+        jcr_cdpp = cdpp(time, flux)
+        jcr_med, jcr_ran, jcr_sig = medransig(flux)
+    else:
+        lerror('Error: input type %s not supported', args.input_type)
+        return
+    nobs = len(flux)
+    l = np.isfinite(flux)
+    nval = l.sum()
+    linfo('')
+    linfo(' Reading light curve')
+    linfo(' -------------------')
+    linfo(' Reading file %s', basename(filename))
+    linfo(' KIC%d Q%d mod%d out%d.', kic, quarter, mod, out)
+    linfo(' Using %s light curve as input', args.input_type)
+    linfo(' Read in %d observations of which %d valid.', nobs, nval)
+    linfo(' Median SAP flux after crowding and aperture loss corrections: %10.1f', sap_med)
+    linfo(' Median PDC flux: %10.1f', pdc_med)
+    if args.input_type == 'JCR': linfo(' Median JCR flux: %10.1f', jcr_med)
+    linfo('')
+
+    # Read in CBV data
+    linfo('')
+    linfo(' Reading CBVs')
+    linfo(' ------------')
+    linfo(' Reading file %s', basename(args.cbvfile))
+    cbv = np.zeros((nobs, 16))
+    h2 = pf.open(args.cbvfile, mode='readonly')
+    if h2[0].header['QUARTER'] != quarter:
+        lerror( 'Error: CBV file is for quarter %d.', \
+                    h2[0].header['QUARTER'])
+        return
+    n_ext = len(h2) - 1
+    for i in np.arange(n_ext)+1:
+        if h2[i].header['MODULE'] != mod: continue
+        if h2[i].header['OUTPUT'] != out: continue
+        for j in np.arange(16):
+            cbv[:,j] = h2[i].data.field('VECTOR_%d' % (j+1)).astype('float64')
+        break
+    h2.close()
+
+    # Apply correction
+    linfo('')
+    linfo(' Applying correction')
+    linfo(' -------------------')
+    res1, res2 = sel_nb(flux, cbv, args.nBmax, use = None)
+    nBopt, flux_cbv, weights = res1
+    flux_cbv_multi, res_cbv_multi = res2
+    cbv_med, cbv_ran, cbv_sig = medransig(flux_cbv)
+    flux_cbv = flux_cbv - cbv_med + sap_med
+    cbv_cdpp = cdpp(time, flux_cbv)
+    linfo('')
+    if args.plot_interactive:
+        linfo(' Statistics in ppm')
+        linfo(' %7s: %10s %10s %10s', \
+                  'version', '6.5h CDPP', 'range', 'scatter')
+        linfo(' %7s: %10d %10d %10d', 'SAP', sap_cdpp, sap_ran, sap_sig)
+        linfo(' %7s: %10d %10d %10d', 'PDC', pdc_cdpp, pdc_ran, pdc_sig)
+        if args.input_type == 'JCR':
+            linfo(' %7s: %10d %10d %10d', 'JCR', jcr_cdpp, jcr_ran, jcr_sig)
+        linfo(' %7s: %10d %10d %10d', 'CBV', cbv_cdpp, cbv_ran, cbv_sig)
+
+    # Save results
+    linfo('')
+    linfo(' Saving results')
+    linfo(' --------------')
+    hdul[1].header['CBV_NMAX'] = str(args.nBmax)
+    hdul[1].header['CBV_NB'] = str(nBopt)
+    hdul[1].header['CBV_WTS']  = str([w for w in weights])
+    hdul[1].header['SAP_MED'] = str(sap_med)
+    hdul[1].header['SAP_CDPP'] = str(sap_cdpp)
+    hdul[1].header['SAP_RAN'] = str(sap_ran)
+    hdul[1].header['SAP_SIG'] = str(sap_sig)
+    hdul[1].header['PDC_CDPP'] = str(pdc_cdpp)
+    hdul[1].header['PDC_RAN'] = str(pdc_ran)
+    hdul[1].header['PDC_SIG'] = str(pdc_sig)
+    if args.input_type == 'JCR':
+        hdul[1].header['JCR_CDPP'] = str(jcr_cdpp)
+        hdul[1].header['JCR_RAN'] = str(jcr_ran)
+        hdul[1].header['JCR_SIG'] = str(jcr_sig)
+    hdul[1].header['CBV_CDPP'] = str(cbv_cdpp)
+    hdul[1].header['CBV_RAN'] = str(cbv_ran)
+    hdul[1].header['CBV_SIG'] = str(cbv_sig)
+    cols = hdul[1].columns
+    if 'CBV_FLUX' in [c.name for c in data.columns]:
+        data['CBV_FLUX'][:] = flux_cbv.astype(np.float32)
+    else:
+        new_col = pf.Column(name='CBV_FLUX', format='E', unit='e-/s', \
+                                disp='E14.7', \
+                                array=flux_cbv.astype(np.float32))
+        cols = cols + new_col
+    for i in range(args.nBmax):
+        flux_cbv_c = flux_cbv_multi[i,:]
+        colname = 'CBV%dFLUX' % (i+1)
+        if colname in [c.name for c in data.columns]:
+            data[colname][:] = flux_cbv_c.astype(np.float32)
+        else:
+            new_col = pf.Column(name=colname, format='E', unit='e-/s', \
+                                disp='E14.7', \
+                                array=flux_cbv_c.astype(np.float32))
+            cols = cols + new_col
+    hdul[1] = pf.BinTableHDU.from_columns(cols, header = hdul[1].header)
+    if args.inplace:
+        hdul.flush()
+    else:
+        hdul.writeto(join(args.savedir, basename(filename)), clobber=True)
+    hdul.close()
+
+    linfo('')
+    linfo(' CBVshrink correction finished succesfully')
+    linfo(' -----------------------------------------')
+    linfo('')
+
+    # Do plots
+    if args.plot_interactive:
+        fig,(ax1,ax2) = pl.subplots(2,1,figsize=(13,10), sharex=True)
+        l = np.isfinite(time)
+        tmin = time[l].min()
+        tmax = time[l].max()
+        pdc = pdc - pdc_med + sap_med
+        diff1 = flux[1:] - flux[:-1]
+        ll1 = np.isfinite(diff1)
+        mm1 = np.median(diff1[ll1])
+        offset1 = 5 * 1.48 * np.median(abs(diff1[ll1] - mm1))
+        diff2 = pdc[1:] - pdc[:-1]
+        ll2 = np.isfinite(diff2)
+        mm2 = np.median(diff2[ll2])
+        offset2 = 5 * 1.48 * np.median(abs(diff2[ll2] - mm2))
+        pl.sca(ax1)
+        pl.plot(time, flux, 'k-')
+        pl.plot(time, flux - pdc + sap_med - offset1, 'g-')
+        pl.sca(ax2)
+        pl.plot(time, pdc, 'g-')        
+        for i in range(args.nBmax):
+            if nBopt == i+1: lw = 2
+            else: lw = 1
+            pl.sca(ax1)
+            flux_cbv = flux_cbv_multi[i,:].flatten()
+            corr = flux - flux_cbv + sap_med
+            dr = i/float(args.nBmax-1)
+            rgb = (1-dr,0,dr)
+            pl.sca(ax1)
+            pl.plot(time, corr - offset1 * (i+2), c = rgb, lw = lw)
+            pl.sca(ax2)
+            pl.plot(time, flux_cbv - offset2 * (i+1), c = rgb, lw = lw)
+        pl.setp(ax1, ylabel='raw flux', \
+                    title = 'KID%d Q%d mod%d out%d)' % \
+                    (kic, quarter, mod, out))
+        pl.setp(ax2, xlim=[tmin,tmax], xlabel='HJD - 2454833', ylabel='corr. flux')
+        fig.tight_layout()
+        pl.show()
+
+if __name__ == '__main__':
+    main()
