@@ -8,10 +8,13 @@ from Kepler light curves; b) and remove the systematics trends from
 the light curves using public co-trending basis vectors (CBV),
 variational Bayes, and shrinkage priors.
 
-The pipeline consists of a Python package `oxksc` and two scripts:
+The pipeline consists of a Python package `oxksc` and two command line scripts:
 
 - `keplerjc`: jump detection, classification, and removal
 - `keplersc`: variational Bayes-based systematics removal 
+
+The scripts can be used to process Kepler light curves individually or in a batch
+with automatic MPI parallelisation.
 
 ## Installation
 
