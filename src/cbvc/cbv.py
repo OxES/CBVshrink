@@ -1,7 +1,7 @@
 import numpy as np
 import pylab as pl
-from VBLinRegARD import bayes_linear_fit_ard as VBF
-from stats import cdpp, medransig
+from .VBLinRegARD import bayes_linear_fit_ard as VBF
+from .stats import cdpp, medransig
 import astropy.io.fits as pyfits
 
 def fit_basis(flux, basis, scl = None):

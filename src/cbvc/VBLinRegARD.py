@@ -19,12 +19,12 @@ def logdet(a):
     '''
     # First make sure that matrix is symmetric:
     if numpy.allclose(a.T,a) == False:
-        print 'MATRIX NOT SYMMETRIC'
+        print ('MATRIX NOT SYMMETRIC')
     # Second make sure that matrix is positive definite:
     eigenvalues = scipy.linalg.eigvalsh(a)
     if min(eigenvalues) <=0:
-        print 'Matrix is NOT positive-definite'
-        print '   min eigv = %.16f' % min(eigenvalues)        
+        print ('Matrix is NOT positive-definite')
+        print ('   min eigv = %.16f' % min(eigenvalues))
     step1 = scipy.linalg.cholesky(a)
     step2 = numpy.diag(step1.T)
     out = 2. * numpy.sum(numpy.log(step2), axis=0)
@@ -73,7 +73,7 @@ def bayes_linear_fit_ard(X, y):
         if numpy.imag(sse)==0:
             sse = numpy.real(sse)[0]
         else:
-            print 'Something went wrong'
+            print ('Something went wrong')
         bn = b0 + 0.5 * (sse + numpy.sum((numpy.array(w)[:,0]**2) * numpy.array(E_a)[:,0], axis=0))
         E_t = an / bn 
         # hyperparameters of covariance prior (cn remains constant)

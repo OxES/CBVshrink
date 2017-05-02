@@ -1,3 +1,4 @@
+#from setuptools import find_packages
 from numpy.distutils.core import setup, Extension
 from numpy.distutils.misc_util import Configuration
 import distutils.sysconfig as ds
@@ -10,8 +11,8 @@ setup(name='OxKeplerSC',
       url='https://github.com/OxES/OxKeplerSC',
       package_dir={'oxksc':'src'},
       scripts=['bin/keplerjc','bin/keplersc'],
-      packages=['oxksc'],
-      ext_modules=[Extension('keplerjc.fmodels', ['src/models.f90'], libraries=['gomp','m'])],
+      packages=['oxksc','oxksc.cbvc','oxksc.jc'],
+      ext_modules=[Extension('oxksc.jc.fmodels', ['src/jc/models.f90'], libraries=['gomp','m'])],
       install_requires=['numpy', 'scipy', 'astropy']
      )
     
