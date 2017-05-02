@@ -4,13 +4,14 @@ import astropy.io.fits as pf
 import logging
 import warnings
 
+import matplotlib.pyplot as pl
+
+from glob import glob
 from argparse import ArgumentParser
 from os.path import isdir, dirname, basename, abspath, join
-from cbvshrink.cbv import fixed_nb, sel_nb
-from cbvshrink.stats import cdpp, medransig
-from glob import glob
 
-import matplotlib.pyplot as pl
+from oxksc.cbvc.cbv import fixed_nb, sel_nb
+from oxksc.cbvc.stats import cdpp, medransig
 
 try:
     from mpi4py import MPI
@@ -60,8 +61,8 @@ def main():
         nfiles = len(files)
         
         logging.info('')
-        logging.info(' Kepler CBVshrink')
-        logging.info(' ----------------')
+        logging.info(' Kepler CBV Systematics Correction')
+        logging.info(' ---------------------------------')
         if nfiles == 1:
             logging.info(' Reducing a single file: %s', abspath(args.filename))
         else:
@@ -287,8 +288,8 @@ def reduce(filename, args):
     hdul.close()
 
     linfo('')
-    linfo(' CBVshrink correction finished succesfully')
-    linfo(' -----------------------------------------')
+    linfo(' keplersc correction finished succesfully')
+    linfo(' ----------------------------------------')
     linfo('')
 
     # Do plots

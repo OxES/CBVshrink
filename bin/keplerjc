@@ -4,12 +4,13 @@ import astropy.io.fits as pf
 import logging
 import warnings
 
+import matplotlib.pyplot as pl
+
+from glob import glob
 from argparse import ArgumentParser
 from os.path import isdir, dirname, basename, abspath, join
-from keplerjc import JumpFinder, JumpClassifier, KData, correct_jumps
-from glob import glob
 
-import matplotlib.pyplot as pl
+from oxksc.jc import JumpFinder, JumpClassifier, KData, correct_jumps
 
 try:
     from mpi4py import MPI
