@@ -1,6 +1,26 @@
-# CBVshrink
-Kepler systematics correction using public co-trending basis vectors
-(CBV), Variational Bayes and shrinkage priors.
+# Oxford Kepler jump and systematics correction pipeline
+
+[![Licence](http://img.shields.io/badge/license-GPLv3-blue.svg?style=flat)](http://www.gnu.org/licenses/gpl-3.0.html)
+[![DOI](https://zenodo.org/badge/5871/hpparvi/PyTransit.svg)](https://zenodo.org/badge/latestdoi/5871/hpparvi/PyTransit)
+
+A pipeline to a) detect, classify, and remove isolated discontinuities
+from Kepler light curves; b) and remove the systematics trends from
+the light curves using public co-trending basis vectors (CBV),
+variational Bayes, and shrinkage priors.
+
+The pipeline consists of a Python package and two scripts:
+
+`KeplerJC` (Kepler Jump Correction) is a Python package to detect,
+classify, and remove isolated discontinuities from individual Kepler
+light curves.
+
+The code models the Kepler light curve as a Gaus sian Process, scans
+the light curve for discontinuities, and classifies the
+discontinuities using simple BIC-based model selection between a jump,
+transit, and flare.
+
+
+
 
 ## Description
 This module uses the co-trending basis vectors (CBVs) derived by the
@@ -38,3 +58,39 @@ See the notebook example1.ipynb in the examples directory.
 - implement recipe for selecting number of CBVs used automatically
 - demonstrate use of "exclude_func" keyword to mask specific regions
   of the light curve during the CBV fitting process.
+
+Installation
+------------
+Clone the code from GitHub
+
+    git clone https://github.com/hpparvi/KeplerJC.git
+
+and install
+
+    cd KeplerJC
+    python setup.py install [--user]
+
+
+Jump detection and correction
+-----------------------------
+    from keplerjc import KData, JumpFinder, JumpClassifier
+
+    kdata = KData(cadence, flux, quality)
+
+    jf = JumpFinder(kdata)
+    jumps = jf.find_jumps()
+
+    jc = JumpClassifier(kdata, jf.hp)
+    jc.classify(jumps)
+
+    kdata.plot(jumps)
+
+![Example_1](examples/ex1.png)
+
+The figure above is reproduced in the `Example_1` IPython notebook under the `examples` directory. Discontinuities identified as jumps are marked with slashed vertical lines, while transit-like features are marked as thick vertical lines spanning the upper part of the figure.
+
+Authors
+-------
+
+- Hannu Parviainen
+- Suzanne Aigrain
