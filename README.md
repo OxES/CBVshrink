@@ -8,19 +8,25 @@ from Kepler light curves; b) and remove the systematics trends from
 the light curves using public co-trending basis vectors (CBV),
 variational Bayes, and shrinkage priors.
 
-The pipeline consists of a Python package and two scripts:
+The pipeline consists of a Python package `oxksc` and two scripts:
 
-`KeplerJC` (Kepler Jump Correction) is a Python package to detect,
-classify, and remove isolated discontinuities from individual Kepler
-light curves.
+- `keplerjc`: jump detection, classification, and removal
+- `keplersc`: variational Bayes-based systematics removal 
 
-The code models the Kepler light curve as a Gaus sian Process, scans
-the light curve for discontinuities, and classifies the
-discontinuities using simple BIC-based model selection between a jump,
-transit, and flare.
+## Installation
 
+Clone the code from GitHub
 
+    git clone https://github.com/OxES/OxKeplerSC.git
 
+and install
+
+    cd OxKeplerSC
+    python setup.py install [--user]
+
+## Dependencies
+
+numpy, scipy, astropy, matplotlib, tqdm
 
 ## Description
 This module uses the co-trending basis vectors (CBVs) derived by the
@@ -45,30 +51,6 @@ older version of our Kepler systematics correction, using the same
 VB-ARD framework, but our own basis vector discovery, was described in
 Roberts, McQuillan, Reece & Aigrain (2013).
 
-## Dependencies
-numpy, pylab, pyfits, argparse
-
-## Installation
-Simply clone the repo and place it in your Python path. 
-
-## Usage
-See the notebook example1.ipynb in the examples directory.
-
-## TBD
-- implement recipe for selecting number of CBVs used automatically
-- demonstrate use of "exclude_func" keyword to mask specific regions
-  of the light curve during the CBV fitting process.
-
-Installation
-------------
-Clone the code from GitHub
-
-    git clone https://github.com/hpparvi/KeplerJC.git
-
-and install
-
-    cd KeplerJC
-    python setup.py install [--user]
 
 
 Jump detection and correction
