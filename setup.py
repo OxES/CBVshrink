@@ -9,7 +9,7 @@ setup(name='OxKeplerSC',
       author_email='suzanne.aigrain@gmail.com',
       url='https://github.com/OxES/OxKeplerSC',
       package_dir={'oxksc':'src'},
-      scripts=['bin/keplerjc','bin/cbvshrink'],
+      scripts=['bin/keplerjc','bin/keplersc'],
       packages=['oxksc'],
       ext_modules=[Extension('keplerjc.fmodels', ['src/models.f90'], libraries=['gomp','m'])],
       install_requires=['numpy', 'scipy', 'astropy']
