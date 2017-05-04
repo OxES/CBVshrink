@@ -32,13 +32,28 @@ and install
 numpy, scipy, astropy, matplotlib, tqdm
 
 ## Description
-This module uses the co-trending basis vectors (CBVs) derived by the
+
+### Jump detection, classification, and removal
+
+The jump detection routines model the Kepler light curve as a Gaussian
+process (GP), and scan for discontinuities in the GP covariance matrix.
+Basic model selection approach is used to classify the identified 
+discontinuities (between a jump, transit, and flare), and the discontinuities
+identified as jumps are corrected.
+
+The detection, classification, and correction routines can be directly
+accessed from `oxksc` package under `oxksc.jc`, or the `keplerjc` script 
+can be used to correct Kepler light curves in MAST format.
+
+### Systematics correction
+
+The systematics removal routines use the co-trending basis vectors (CBVs) derived by the
 Kepler PDC-MAP pipeline and published on the MAST archive to detrend
 individual Kepler light curves. Like the PDC-MAP pipeline, each light
 curve is modelled as a linear combination of CBVs. However, here this
 model is implemented in a Variational Bayes (VB) framework, where the
 priors over the weights associated with each CBV are optimized to
-mximse the marginal likelihood of hte model. Because we use zero-mean
+maximse the marginal likelihood of hte model. Because we use zero-mean
 Gaussian priors for the weights, with hyper-priors on the widths of
 those priors centred on zero, any CBV not strongly supported by the
 data is not used in the final model. This approach, known as automatic
@@ -49,33 +64,20 @@ the light curves by the correction, including on planetary transit
 (few hour) timescales. Finally, it also preserves intrinsic stellar
 variability more successfully than the standard PDC-MAP pipeline.
 
-For more info, see Aigrain, Parvianen, Roberts & Evans (in prep.). An
+The systematics correction routines can be accessed directly from the
+`oxksc` module under `oxksc.cbvc`, or the `keplersc` script can be 
+used to correct Kepler light curves in MAST format. For best results,
+`keplersc` should be ran for light curves that have already been corrected for
+jumps with `keplerj`.
+
+## More information
+
+See Aigrain, Parvianen, Roberts & Evans (2017). An
 older version of our Kepler systematics correction, using the same
 VB-ARD framework, but our own basis vector discovery, was described in
 Roberts, McQuillan, Reece & Aigrain (2013).
 
+## Authors
 
-
-Jump detection and correction
------------------------------
-    from keplerjc import KData, JumpFinder, JumpClassifier
-
-    kdata = KData(cadence, flux, quality)
-
-    jf = JumpFinder(kdata)
-    jumps = jf.find_jumps()
-
-    jc = JumpClassifier(kdata, jf.hp)
-    jc.classify(jumps)
-
-    kdata.plot(jumps)
-
-![Example_1](examples/ex1.png)
-
-The figure above is reproduced in the `Example_1` IPython notebook under the `examples` directory. Discontinuities identified as jumps are marked with slashed vertical lines, while transit-like features are marked as thick vertical lines spanning the upper part of the figure.
-
-Authors
--------
-
-- Hannu Parviainen
-- Suzanne Aigrain
+- Suzanne Aigrain, University of Oxford
+- Hannu Parviainen, Instituto de Astrofísica de Canarias
