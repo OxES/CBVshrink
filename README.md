@@ -27,6 +27,15 @@ and install
     cd OxKeplerSC
     python setup.py install [--user]
 
+## Usage
+
+    keplerjc [--savedir=dir | --inplace] file_or_dir
+    keplersc [--savedir=dir | --inplace] file_or_dir cbv_file
+
+See `--help` for more advanced command line arguments. The scripts will
+process all the files in a directory if `file_or_dir` is a directory,
+and parallelise automatically if they're run with `mpirun` or `mpiexec`.
+
 ## Dependencies
 
 numpy, scipy, astropy, matplotlib, tqdm
