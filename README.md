@@ -1,6 +1,7 @@
 # Oxford Kepler jump and systematics correction pipeline
 
 [![Licence](http://img.shields.io/badge/license-GPLv3-blue.svg?style=flat)](http://www.gnu.org/licenses/gpl-3.0.html)
+[![DOI](https://zenodo.org/badge/75633936.svg)](https://zenodo.org/badge/latestdoi/75633936)
 
 A pipeline to a) detect, classify, and remove isolated discontinuities
 from Kepler light curves; b) and remove the systematics trends from
