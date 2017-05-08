@@ -1,6 +1,7 @@
-# Oxford Kepler jump and systematics correction pipeline
+# Oxford Kepler systematics correction pipeline
 
 [![Licence](http://img.shields.io/badge/license-GPLv3-blue.svg?style=flat)](http://www.gnu.org/licenses/gpl-3.0.html)
+[![DOI](https://zenodo.org/badge/75633936.svg)](https://zenodo.org/badge/latestdoi/75633936)
 
 A pipeline to a) detect, classify, and remove isolated discontinuities
 from Kepler light curves; b) and remove the systematics trends from
@@ -25,6 +26,15 @@ and install
 
     cd OxKeplerSC
     python setup.py install [--user]
+
+## Usage
+
+    keplerjc [--savedir=dir | --inplace] file_or_dir
+    keplersc [--savedir=dir | --inplace] file_or_dir cbv_file
+
+See `--help` for more advanced command line arguments. The scripts will
+process all the files in a directory if `file_or_dir` is a directory,
+and parallelise automatically if they're run with `mpirun` or `mpiexec`.
 
 ## Dependencies
 
