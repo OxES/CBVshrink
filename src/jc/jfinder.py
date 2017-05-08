@@ -1,5 +1,6 @@
 from __future__ import division
 from tqdm import tqdm
+from numpy import sign
 from astropy.stats import sigma_clip
 from .core import *
 from .mugp import MuGP
@@ -90,8 +91,8 @@ class JumpFinder(object):
         labels, nl = label(lnlrm.mask)
         jumps = [self.cadence[argmax(where(labels == i, mlnlike, -inf))] for i in range(1, nl + 1)]
 
-        ## Compute the amplitudes
-        ## ----------------------
+        # Compute the amplitudes
+        # ----------------------
         jids   = [self.cadence.searchsorted(j) for j in jumps]
         slices = [s_[max(0,j-self.chunk_size//2):min(self.flux.size-1, j+self.chunk_size//2)] for j in jids]
         
@@ -105,6 +106,24 @@ class JumpFinder(object):
 
         jumps = [Discontinuity(j,a, self.cadence, 1.+self.flux) for j,a in zip(jumps, amplitudes)]
         jumps = [j for j in jumps if not any([e[0] <= j.position <= e[1] for e in self.exclude])]
+
+        # Merge likely transits
+        # ---------------------
+        merge_limit = 12
+        jt = []
+        skip = False
+        for i, j1 in enumerate(jumps):
+            if not skip:
+                if (i < len(jumps) - 1):
+                    j2 = jumps[i + 1]
+                    if (j2.position - j1.position) < merge_limit and j1.amplitude < 0 and j2.amplitude > 0:
+                        jt.append(Discontinuity(0.5 * (j1.position + j2.position), j1.amplitude, self.cadence, 1.+self.flux))
+                        skip = True
+                        continue
+                jt.append(j1)
+            else:
+                skip = False
+        jumps = jt
         return DiscontinuitySet(jumps)
 
     
