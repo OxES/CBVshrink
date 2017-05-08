@@ -4,6 +4,7 @@ from scipy.signal import medfilt as mf
 from .core import *
 from .models import *
 
+jump_classes = dmodels
 
 class Discontinuity(object):
 

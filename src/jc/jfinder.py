@@ -1,5 +1,6 @@
 from __future__ import division
 from tqdm import tqdm
+from astropy.stats import sigma_clip
 from .core import *
 from .mugp import MuGP
 from .discontinuity import Discontinuity, DiscontinuitySet
@@ -61,31 +62,34 @@ class JumpFinder(object):
         self.hp = median(self.hps, 0)
 
         
-    def compute_lnl(self):
+    def compute_lnl(self, wsize=None):
         self.lnlike = lnlike = zeros_like(self.flux)
         self.gp.set_parameters(self.hp)
-        
-        for sl in tqdm(self.chunks, desc='Finding discontinuities'):
-            breaks = [None]+list(self.cadence[sl])
-            lnl = array([self.gp.lnlikelihood(self.cadence[sl], self.flux[sl], br) for br in breaks])
-            lnl[1] = lnl[2]
-            lnlike[sl] = lnl[1:]-lnl[0]
+
+        npt = self.cadence.size
+        nsc = wsize or self.chunk_size
+        hsc = nsc // 2
+
+        for i in tqdm(range(5, npt - 5), desc='Scanning for discontinuities'):
+            imin = min(max(i - hsc, 0), npt - nsc)
+            imax = max(min(i + hsc, npt), nsc)
+            cadence = self.cadence[imin:imax]
+            flux = self.flux[imin:imax]
+            lnlike[i] = self.gp.lnlikelihood(cadence, flux, self.cadence[i]) - self.gp.lnlikelihood(cadence, flux)
         return lnlike
 
     
-    def find_jumps(self, sigma=10, learn=True, cln=True):
+    def find_jumps(self, sigma_cut=10, learn=True, cln=True):
         if learn:
             self.learn_hp(max_chunks=15)
         if cln:
             self.compute_lnl()
         
         mlnlike = self.lnlike - mf(self.lnlike, 90)
-        sigma  = 1.4826 * median(abs(mlnlike-median(mlnlike)))
-        lnmask = mlnlike > 15*sigma
-        labels, nl = label(ndi.binary_dilation(lnmask, iterations=5))
-        jumps = [self.cadence[argmax(where(labels==i, self.lnlike, 0))] for i in range(1,nl+1)]
-        jumps = [j for j in jumps if j>0]
-        
+        lnlrm = sigma_clip(mlnlike, sigma_upper=sigma_cut, sigma_lower=inf)
+        labels, nl = label(lnlrm.mask)
+        jumps = [self.cadence[argmax(where(labels == i, mlnlike, -inf))] for i in range(1, nl + 1)]
+
         ## Compute the amplitudes
         ## ----------------------
         jids   = [self.cadence.searchsorted(j) for j in jumps]
