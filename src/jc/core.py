@@ -23,13 +23,6 @@ try:
 except ImportError:
     with_pandas = False
 
-try:
-    import matplotlib.pyplot as pl
-    with_matplotlib = True
-except ImportError:
-    with_matplotlib = False
-
-
 ## Utility functions
 ## =================
 def amax(v):
@@ -87,6 +80,8 @@ class KData(object):
     
     
     def plot(self, jumps=None, ax=None):
+        import matplotlib.pyplot as pl
+
         if ax is None:
             fig,ax = pl.subplots(1,1)
 

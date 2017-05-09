@@ -1,6 +1,6 @@
 from __future__ import division
 from .core import *
-from .discontinuity import Discontinuity, DiscontinuitySet
+from .discontinuity import Discontinuity
 from .mugp import MuGP
 
 
