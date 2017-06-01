@@ -76,8 +76,8 @@ variability more successfully than the standard PDC-MAP pipeline.
 The systematics correction routines can be accessed directly from the
 `oxksc` module under `oxksc.cbvc`, or the `keplersc` script can be 
 used to correct Kepler light curves in MAST format. For best results,
-`keplersc` should be ran for light curves that have already been corrected for
-jumps with `keplerj`.
+`keplersc` should be ran for light curves that have already been corrected
+for jumps with `keplerj`.
 
 ## More information
 
