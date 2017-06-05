@@ -31,7 +31,7 @@ logging.basicConfig(level=logging.INFO)
 def main():
     ap = ArgumentParser()
     ap.add_argument('filename', type=str, help='input light curve file')
-    ap.add_argument('cbvfile', type=str, help='input CBV file')
+    ap.add_argument('cbvdir', type=str, help='directory contaning input CBV files')
     ap.add_argument('--nBmax', type=int, default=8, help='max. no CBVs to use (default 8)')
     ap.add_argument('--savedir', type=str, default='.', help='Directory to save the files in')
     ap.add_argument('--inplace', action='store_true', default=False, help='Modify the original files.')
@@ -148,6 +148,7 @@ def reduce(filename, args):
     # Read in light curve data
     kic = hdul[0].header['KEPLERID']
     quarter = hdul[0].header['QUARTER']
+    data_rel = hdul[0].header['DATA_REL']
     data = hdul[1].data
     time = data.field('TIME').astype('float64')
     sap = data.field('SAP_FLUX').astype('float64')
@@ -193,6 +194,7 @@ def reduce(filename, args):
     linfo(' -------------------')
     linfo(' Reading file %s', basename(filename))
     linfo(' KIC%d Q%d mod%d out%d.', kic, quarter, mod, out)
+    linfo(' Data release %d', data_rel)
     linfo(' Using %s light curve as input', args.input_type)
     linfo(' Read in %d observations of which %d valid.', nobs, nval)
     linfo(' Median SAP flux after crowding and aperture loss corrections: %10.1f', sap_med)
@@ -204,12 +206,23 @@ def reduce(filename, args):
     linfo('')
     linfo(' Reading CBVs')
     linfo(' ------------')
-    linfo(' Reading file %s', basename(args.cbvfile))
+    linfo(' Looking in directory %s', args.cbvdir)
+    cbvfile = glob('%s/kplr*-q%02d-d%0-2d_lcbv.fits' % 
+                   (args.cbvdir, quarter, data_rel))
+    if len(cbvfile) == 0:
+        lerror(' Error: No CBV file for quarter %d and data release %d.', 
+                 quarter, data_rel)
+        return
     cbv = np.zeros((nobs, 16))
-    h2 = pf.open(args.cbvfile, mode='readonly')
+    linfo(' Using CBV file %s', basename(cbvfile[0]))
+    h2 = pf.open(cbvfile[0], mode='readonly')
     if h2[0].header['QUARTER'] != quarter:
         lerror( 'Error: CBV file is for quarter %d.', \
                     h2[0].header['QUARTER'])
+        return
+    if h2[0].header['DATA_REL'] != data_rel:
+        lerror( 'Error: CBV file is for data release %d.', \
+                    h2[0].header['DATA_REL'])
         return
     n_ext = len(h2) - 1
     for i in np.arange(n_ext)+1:
