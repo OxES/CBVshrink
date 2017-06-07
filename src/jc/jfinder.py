@@ -1,7 +1,8 @@
 from __future__ import division
 from tqdm import tqdm
-from numpy import sign
-from astropy.stats import sigma_clip
+from scipy.optimize import minimize
+from numpy import sign, isfinite, poly1d, polyfit
+from astropy.stats import sigma_clip, LombScargle
 from .core import *
 from .mugp import MuGP
 from .discontinuity import Discontinuity, DiscontinuitySet
@@ -39,7 +40,11 @@ class JumpFinder(object):
         
         self.cadence = self._kdata.cadence
         self.flux    = self._kdata.mf_normalized_flux
-        
+        self.period  = self.estimate_period()
+
+        self.gp.pv0[3] = self.period
+        self.gp.pv[3] = self.period
+
         self.chunk_size = cs = chunk_size
         self.n_chunks   = nc = self.flux.size // chunk_size
         self.chunks = [s_[i*cs:(i+1)*cs] for i in range(nc)] + [s_[cs*nc:]]
@@ -47,25 +52,50 @@ class JumpFinder(object):
         self.exclude = kwargs.get('exclude', [])
         self.exclude.append(self.cadence[[0,25]])
         self.exclude.extend(kdata.calculate_exclusion_ranges(5))
-    
-        
+
+
+    def estimate_period(self):
+        mask = isfinite(self.cadence) & isfinite(self.flux)
+        cd, fl = self.cadence[mask] - self.cadence[mask].mean(), self.flux[mask]
+        fl -= poly1d(polyfit(cd, fl, 7))(cd)
+        freq = np.linspace(0.005, 0.05, 5000)
+        power = LombScargle(cd, fl).power(freq, method='fast')
+        return 1. / freq[np.argmax(power)]
+
+
     def minfun(self, pv, sl):
         if any(pv <= 0): 
             return inf
-        self.gp.set_parameters(pv)
+        self.gp.pv[[0,1,2,4]] = pv
+        self.gp.dirty = True
         return -self.gp.lnlikelihood(self.cadence[sl], self.flux[sl])
 
     
     def learn_hp(self, max_chunks=50):
         self.hps = []
         for sl in tqdm(self.chunks[:max_chunks], desc='Learning noise hyperparameters'):
-            self.hps.append(fmin(self.minfun, self.gp.pv0, args=(sl,), disp=False))
+            cd, fl = self.cadence[sl], self.flux[sl]
+            fl = fl - fl.mean()
+            pv0 = [fl.std(), 50, 1, 1.4 * np.diff(fl).std()]
+
+            def minfun(pv):
+                if any(pv<=0):
+                    return inf
+                self.gp.pv[[0, 1, 2, 4]] = pv
+                self.gp.dirty = True
+                return -self.gp.lnlikelihood(cd, fl)
+
+            res = minimize(minfun, pv0, method='nelder-mead')
+            self.hps.append(res.x)
+            #self.hps.append(fmin(self.minfun, self.gp.pv0, args=(sl,), disp=False))
         self.hp = median(self.hps, 0)
 
         
     def compute_lnl(self, wsize=None):
         self.lnlike = lnlike = zeros_like(self.flux)
-        self.gp.set_parameters(self.hp)
+        self.gp.pv[3] = self.period
+        self.gp.pv[[0,1,2,4]] = self.hp
+        #self.gp.set_parameters(self.hp)
 
         npt = self.cadence.size
         nsc = wsize or self.chunk_size
@@ -75,7 +105,7 @@ class JumpFinder(object):
             imin = min(max(i - hsc, 0), npt - nsc)
             imax = max(min(i + hsc, npt), nsc)
             cadence = self.cadence[imin:imax]
-            flux = self.flux[imin:imax]
+            flux = self.flux[imin:imax] - self.flux[imin:imax].mean()
             lnlike[i] = self.gp.lnlikelihood(cadence, flux, self.cadence[i]) - self.gp.lnlikelihood(cadence, flux)
         return lnlike
 
