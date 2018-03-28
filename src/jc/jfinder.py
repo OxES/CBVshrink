@@ -37,8 +37,8 @@ class JumpFinder(object):
         self.hps = None
         self.hp  = None
         
-        self.cadence = self._kdata.cadence
-        self.flux    = self._kdata.mf_normalized_flux
+        self.cadence = kdata.masked_cadence
+        self.flux    = kdata.mf_normalized_masked_flux
         
         self.chunk_size = cs = chunk_size
         self.n_chunks   = nc = self.flux.size // chunk_size
@@ -104,7 +104,7 @@ class JumpFinder(object):
             k = np.argmin(np.abs(cad-jump))
             amplitudes.append(pr[k]-pr[k-1])
 
-        jumps = [Discontinuity(j,a, self.cadence, 1.+self.flux) for j,a in zip(jumps, amplitudes)]
+        jumps = [Discontinuity(j, a, self._kdata) for j,a in zip(jumps, amplitudes)]
         jumps = [j for j in jumps if not any([e[0] <= j.position <= e[1] for e in self.exclude])]
 
         # Merge likely transits
@@ -117,7 +117,7 @@ class JumpFinder(object):
                 if (i < len(jumps) - 1):
                     j2 = jumps[i + 1]
                     if (j2.position - j1.position) < merge_limit and j1.amplitude < 0 and j2.amplitude > 0:
-                        jt.append(Discontinuity(0.5 * (j1.position + j2.position), j1.amplitude, self.cadence, 1.+self.flux))
+                        jt.append(Discontinuity(0.5 * (j1.position + j2.position), j1.amplitude, self._kdata))
                         skip = True
                         continue
                 jt.append(j1)

@@ -12,8 +12,8 @@ class JumpClassifier(object):
         assert kernel in ['e', 'g']
 
         self._kdata = kdata
-        self.cadence = self._kdata.cadence
-        self.flux = self._kdata.mf_normalized_flux
+        self.cadence = self._kdata.masked_cadence
+        self.flux = self._kdata.mf_normalized_masked_flux
 
         self.use_gp = use_gp
         self.gp = MuGP(kernel=kernel)

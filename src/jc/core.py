@@ -14,7 +14,7 @@ from scipy.stats import norm
 from scipy.ndimage import median_filter as mf
 from scipy.ndimage import label
 
-from numpy import asfortranarray as afa
+from numpy import asfortranarray as afa, argmin, arange
 from numpy import s_, inf, median, zeros_like, array, argmax, where
 
 try:
@@ -29,36 +29,53 @@ def amax(v):
     return v[np.argmax(np.abs(v))]
 
 class KData(object):
-    def __init__(self, cadence, flux, quality):
+    def __init__(self, cadence, time, flux, quality):
         self._cadence = cadence.copy()
-        self._flux = flux.copy()
+        self._time = time.astype('d').copy()
+        self._flux = flux.astype('d').copy()
         self._quality = quality.copy()
         self._flux_o = flux.copy()
-        self._mask = np.isfinite(cadence) & np.isfinite(flux)
+        self._mask = np.isfinite(cadence) & np.isfinite(flux) & np.isfinite(time)
         
     @property
     def cadence(self):
-        return self._cadence[self._mask]
+        return self._cadence.copy()
+
+    @property
+    def masked_cadence(self):
+        return self._cadence[self._mask].copy()
+
+    @property
+    def time(self):
+        return self._time.copy()
+
+    @property
+    def masked_time(self):
+        return self._time[self._mask].copy()
 
     @property
     def flux(self):
-        return self._flux[self._mask]
+        return self._flux.copy()
+
+    @property
+    def masked_flux(self):
+        return self._flux[self._mask].copy()
 
     @property
     def mf_flux(self):
-        f1 = self.flux
+        f1 = self.masked_flux
         f2 = mf(f1, 3)
         fr = f1-f2
         mad = np.median(abs(fr))
         return np.where(fr > 20*mad, f2, f1)
     
     @property
-    def normalized_flux(self):
-        return self.flux / self.median - 1.
+    def normalized_masked_flux(self):
+        return self.masked_flux / self.median - 1.
 
     @property
-    def mf_normalized_flux(self):
-        f1 = self.normalized_flux
+    def mf_normalized_masked_flux(self):
+        f1 = self.normalized_masked_flux
         f2 = mf(f1, 3)
         fr = f1-f2
         mad = np.median(abs(fr))
@@ -66,18 +83,29 @@ class KData(object):
         
     @property
     def median(self):
-        return np.median(self.flux)
+        return np.median(self.masked_flux)
 
     @property
-    def original_flux(self):
+    def original_masked_flux(self):
         return self._flux_o[self._mask]
 
+    def mask_transit(self, t0, p, t14):
+        phase = ((self.masked_time - t0) / p + 0.5) % 1 - 0.5
+        self._mask[self._mask] &= np.abs(phase) > t14 / p
     
     def calculate_exclusion_ranges(self, b):
         a = array([-b,b])
         lids, nreg  = label((self._quality & 2**3).astype(np.bool))
         return [self._cadence[lids == i][[0,-1]] + a for i in range(1,nreg+1)]
-    
+
+    def get_window(self, c0, width, masked=True):
+        hw = width // 2
+        cd = self._cadence
+        s = s_[argmin(abs(cd - (c0 - hw))): argmin(abs(cd - (c0 + hw)))]
+        ids = arange(cd.size)[s]
+        if masked:
+            ids = ids[self._mask[s]]
+        return cd[ids], self._flux[ids], ids
     
     def plot(self, jumps=None, ax=None):
         import matplotlib.pyplot as pl
@@ -85,7 +113,7 @@ class KData(object):
         if ax is None:
             fig,ax = pl.subplots(1,1)
 
-        ax.plot(self._cadence, self._flux, 'k')
+        ax.plot(self.cadence, self.flux, 'k')
 
         if jumps is not None:
             [ax.axvline(j.pos, ls=':', c='k', alpha=0.25) for j in jumps if j.type=='noise'] 
@@ -93,7 +121,7 @@ class KData(object):
             [ax.axvline(j.pos, 0.9, 1.0, c='k', lw=3)     for j in jumps if j.type=='transit']
             [ax.axvline(j.pos, ls='-', c='k', alpha=0.5) for j in jumps if j.type=='flare']
 
-        pl.setp(ax, xlim=self._cadence[[0,-1]], xlabel='Cadence', ylabel='Flux')
+        pl.setp(ax, xlim=self.cadence[[0,-1]], xlabel='Cadence', ylabel='Flux')
 
         if ax is None:
             fig.tight_layout()

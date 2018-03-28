@@ -3,6 +3,7 @@ from .jclassifier import JumpClassifier
 from .core import KData
 from .discontinuity import Discontinuity, DiscontinuitySet
 from .models import Slope, Jump, Jump2, Transit, Flare
+from copy import deepcopy
 
 __all__ = 'correct_jumps KData JumpFinder JumpClassifier Discontinuity DiscontinuitySet'.split()
 
@@ -20,8 +21,8 @@ def correct_jumps(data, jumps):
 
     jc    : JumpClassifier
     """
-    kd = KData(data._cadence, data._flux, data._quality)
+    kd = deepcopy(data) #KData(data._cadence, data._time, data._flux, data._quality)
     for j in jumps:
         if isinstance(j.type, (Jump,Jump2)):
-            kd._flux[kd._mask] -= kd.median*j.global_model_wo_baseline()
+            kd._flux -= kd.median*j.global_model_wo_baseline()
     return kd

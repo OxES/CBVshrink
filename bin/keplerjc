@@ -47,6 +47,9 @@ def main():
     ap.add_argument('--modules', type=str, default=None)
     ap.add_argument('--outputs', type=str, default=None)
     ap.add_argument('--modouts', type=str, default=None)
+    ap.add_argument('--mask-epoch', type=float, default=None)
+    ap.add_argument('--mask-period', type=float, default=None)
+    ap.add_argument('--mask-duration', type=float, default=None)
     args = ap.parse_args()
 
     ## Logging
@@ -155,9 +158,13 @@ def reduce(filename, args):
             return
         
     data     = hdul[1].data
-    kdata    = KData(data['cadenceno'], data['sap_flux'], data['sap_quality'])
+    kdata    = KData(data['cadenceno'], data['time'], data['sap_flux'], data['sap_quality'])
     excluded = excluded_cadences.get(qrt, [])
-    
+
+    if args.mask_epoch and args.mask_period and args.mask_duration:
+        linfo('Masking a known transit')
+        kdata.mask_transit(args.mask_epoch, args.mask_period, args.mask_duration)
+
     linfo('')
     linfo(' Reducing file %s', basename(filename))
     linfo('')
@@ -191,7 +198,7 @@ def reduce(filename, args):
     if args.inplace:
         hdul.flush()
     else:
-        hdul.writeto(join(args.savedir, basename(filename)), clobber=False)
+        hdul.writeto(join(args.savedir, basename(filename)), overwrite=True)
     hdul.close()
 
     linfo('')
