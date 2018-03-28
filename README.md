@@ -16,6 +16,8 @@ The pipeline consists of a Python package `oxksc` and two command line scripts:
 The scripts can be used to process Kepler light curves individually or in a batch
 with automatic MPI parallelisation.
 
+**Note:** The current jump detection and removal routines can introduce errors with rapid rotators. We're working on a improved approach using a quasiperiodic GP kernel in the `periodic_jd` branch. The branch will be merged to master in the near future, but can be used already for rapid rotator discontinuity correction.
+
 ## Installation
 
 Clone the code from GitHub
